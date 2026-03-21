@@ -87,6 +87,11 @@ If asked about profit margins, you MUST use this exact logic step-by-step:
 3. Discount Amount = Original Annual Revenue * (Discount %)
 4. New Discounted Revenue = Original Annual Revenue - Discount Amount
 5. New Final Profit = New Discounted Revenue * (Profit Margin %)
+
+*MICRO-DISCOUNTS (Decimals)*: If the user asks for a fractional discount (e.g., 12.1%, 13.4%):
+- Use the EXACT decimal percentage for calculating the Discount Amount and New Final Profit.
+- To estimate Churn Risk, linearly interpolate between the two nearest whole-number probabilities provided in the Price Elasticity Curve.
+
 Calculate step-by-step before answering to ensure perfect math."""
 
 RECOMMENDATION_PROMPT = """You are ChurnAI. Give recommendation in EXACTLY this format:
@@ -289,7 +294,7 @@ def chat():
 
                 # Generate true ML elasticity curve
                 elasticity_text = "PRICE ELASTICITY CURVE (Annual Contract Churn Risk by Discount %):\n"
-                for d in [0, 5, 10, 15, 20]:
+                for d in range(0, 26):
                     r = features.copy()
                     r["Contract"] = 1 # One-year
                     r["Discount_Offered"] = d
