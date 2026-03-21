@@ -65,7 +65,7 @@ If info is missing, ask for it first.
  "SeniorCitizen": X, "Partner": X, "Dependents": X,
  "MultipleLines": X, "OnlineBackup": X, "DeviceProtection": X,
  "StreamingTV": X, "StreamingMovies": X, "PaperlessBilling": X,
- "TotalCharges": X, "PhoneService": X, "gender": X}
+ "TotalCharges": X, "PhoneService": X, "gender": X, "Discount_Offered": X}
 </PREDICT>
 
 Encodings:
@@ -77,10 +77,17 @@ Encodings:
 - All other yes/no: 0=No, 1=Yes
 - TotalCharges = tenure x MonthlyCharges if not given"""
 
-FOLLOWUP_PROMPT = """You are ChurnAI — a senior customer retention analyst.
-You already analyzed a customer. Answer the follow-up question directly and specifically.
-Use the customer context. Be conversational, precise, and helpful.
-Give numbers where possible. Think like a retention manager."""
+FOLLOWUP_PROMPT = """You are ChurnAI — a senior CFO and customer retention analyst.
+Answer the follow-up question directly and specifically using the customer context.
+
+CRITICAL ACCOUNTING RULES FOR PROFITABILITY:
+If asked about profit margins, you MUST use this exact logic step-by-step:
+1. Original Annual Revenue = (Monthly Revenue * 12)
+2. Original Profit = Original Annual Revenue * (Profit Margin %)
+3. Discount Amount = Original Annual Revenue * (Discount %)
+4. New Discounted Revenue = Original Annual Revenue - Discount Amount
+5. New Final Profit = New Discounted Revenue * (Profit Margin %)
+Calculate step-by-step before answering to ensure perfect math."""
 
 RECOMMENDATION_PROMPT = """You are ChurnAI. Give recommendation in EXACTLY this format:
 
@@ -91,13 +98,33 @@ WHAT THE DATA SHOWS:
 [1-2 sentences — past similar customers, what worked, what failed]
 
 WHAT YOU MUST DO RIGHT NOW:
-1. [Specific action with timeline]
-2. [Specific offer]
+1. [Specific action with timeline. You must dynamically select the OPTIMAL discount percentage (e.g., 5%, 8%, or 15%) to offer. Do NOT default to 10%. Base your chosen % on their specific churn probability.]
+2. [Specific offer using your chosen discount %]
 3. [Backup if they refuse]
+
+BUSINESS IMPACT:
+[Explicitly calculate the financial impact using this strict formula:
+1. Calculate Original Revenue (Monthly * 12)
+2. Calculate Discount Amount
+3. Calculate New Discounted Revenue
+4. Calculate Final Profit = (New Discounted Revenue) * (20% Profit Margin).
+Prove your chosen discount is profitable by stating the Final Profit.]
 
 BOTTOM LINE:
 [Single most important thing today]"""
 
+
+def find_cohort_size(features, df):
+    cohort = df.copy()
+    cohort = cohort[cohort['Churn'] == 0] # Active customers only
+    if 'Contract' in features:
+        cohort = cohort[cohort['Contract'] == int(features['Contract'])]
+    if 'InternetService' in features:
+        cohort = cohort[cohort['InternetService'] == int(features['InternetService'])]
+    if 'tenure' in features:
+        # Group similar tenure within a 12 month band
+        cohort = cohort[abs(cohort['tenure'] - features.get('tenure', 12)) <= 6]
+    return max(1, len(cohort)) # Ensure at least 1 (this specific customer)
 
 def customer_to_text(features):
     contract_map = {0: "month-to-month", 1: "one-year", 2: "two-year"}
@@ -153,7 +180,8 @@ def run_prediction(features):
         "InternetService": 1, "OnlineSecurity": 0, "OnlineBackup": 0,
         "DeviceProtection": 0, "TechSupport": 0, "StreamingTV": 0,
         "StreamingMovies": 0, "Contract": 0, "PaperlessBilling": 1,
-        "PaymentMethod": 2, "MonthlyCharges": 65.0, "TotalCharges": 780.0
+        "PaymentMethod": 2, "MonthlyCharges": 65.0, "TotalCharges": 780.0,
+        "Discount_Offered": 0
     }
     defaults.update(features)
     row = pd.DataFrame([[defaults.get(f, 0) for f in feature_names]], columns=feature_names)
@@ -228,7 +256,7 @@ def chat():
                     {"role": "system", "content": FOLLOWUP_PROMPT},
                     {"role": "user", "content": f"CUSTOMER CONTEXT:\n{current_context}\n\nQUESTION: {user_input}"}
                 ],
-                max_tokens=512, temperature=0.7,
+                max_tokens=1200, temperature=0.7,
             ).choices[0].message.content.strip()
             print(f"\nChurnAI → {answer}")
             chat_history.append({"role": "user", "content": user_input})
@@ -251,6 +279,22 @@ def chat():
                 last_features = features
                 result        = run_prediction(features)
                 rag_display, rag_summary = find_similar_customers(features)
+                cohort_size   = find_cohort_size(features, df_raw)
+
+                # Pure Business Math (Revenue Only - Let LLM Dynamically Create Discounts and Profit Margins)
+                revenue_per_user     = result['monthly'] * 12 # 12-month forward ARR
+                
+                # Global scale
+                global_revenue_loss  = cohort_size * revenue_per_user
+
+                # Generate true ML elasticity curve
+                elasticity_text = "PRICE ELASTICITY CURVE (Annual Contract Churn Risk by Discount %):\n"
+                for d in [0, 5, 10, 15, 20]:
+                    r = features.copy()
+                    r["Contract"] = 1 # One-year
+                    r["Discount_Offered"] = d
+                    res_d = run_prediction(r)
+                    elasticity_text += f"- {d}% discount: {res_d['probability']:.1%} risk\n"
 
                 recommendation = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -258,13 +302,14 @@ def chat():
                         {"role": "system", "content": RECOMMENDATION_PROMPT},
                         {"role": "user", "content": (
                             f"Churn probability: {result['probability']:.1%} ({result['risk']})\n"
-                            f"Monthly: ${result['monthly']:.0f} | Tenure: {result['tenure']:.0f} months\n"
-                            f"Annual contract reduces risk to {result['contract_prob']:.1%}\n"
-                            f"Revenue saved: ${result['savings']:.2f}\n"
+                            f"Monthly Revenue: ${result['monthly']:.0f}\n"
+                            f"{elasticity_text}\n"
+                            f"COHORT SIZE: {cohort_size} active customers in the database share this profile.\n"
+                            f"GLOBAL REVENUE RISK: If all {cohort_size} churn, we lose ${global_revenue_loss:,.0f} in ARR.\n"
                             f"RAG: {rag_summary}"
                         )}
                     ],
-                    max_tokens=400, temperature=0.5,
+                    max_tokens=1200, temperature=0.5,
                 ).choices[0].message.content.strip()
 
                 # Store full context so follow-ups work
@@ -272,11 +317,9 @@ def chat():
                     f"Profile: {customer_to_text(features)}\n"
                     f"Churn risk: {result['probability']:.1%} ({result['risk']})\n"
                     f"Monthly charges: ${result['monthly']:.0f}\n"
-                    f"Tenure: {result['tenure']:.0f} months\n"
-                    f"Annual revenue from this customer: ${result['monthly']*12:.0f}\n"
-                    f"If they churn tomorrow, total revenue lost: ${result['monthly'] * (12 - result['tenure']):.0f} (remaining year)\n"
-                    f"Annual contract reduces churn to: {result['contract_prob']:.1%}\n"
-                    f"Revenue saved by acting: ${result['savings']:.2f}\n"
+                    f"{elasticity_text}\n"
+                    f"COHORT SIZE: {cohort_size} active customers match this profile.\n"
+                    f"GLOBAL REVENUE RISK (All {cohort_size} churn): We lose ${global_revenue_loss:,.0f} in Top-Line Revenue.\n"
                     f"RAG Evidence: {rag_summary}\n"
                     f"Recommendation: {recommendation}"
                 )

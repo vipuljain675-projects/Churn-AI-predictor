@@ -19,7 +19,7 @@ model = joblib.load("models/churn_model.pkl")
 feature_names = joblib.load("models/feature_names.pkl")
 
 # Recreate same dataset as Stage 2
-df = pd.read_csv("data/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+df = pd.read_csv("data/WA_Fn-UseC_-Telco-Customer-Churn-Augmented.csv")
 df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce').fillna(0)
 df = df.drop('customerID', axis=1)
 df['Churn'] = (df['Churn'] == 'Yes').astype(int)

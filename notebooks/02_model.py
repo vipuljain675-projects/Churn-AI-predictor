@@ -22,7 +22,7 @@ import joblib  # for saving the trained model
 import os
 
 # ── LOAD DATA ──────────────────────────────────
-df = pd.read_csv('data/WA_Fn-UseC_-Telco-Customer-Churn.csv')
+df = pd.read_csv('data/WA_Fn-UseC_-Telco-Customer-Churn-Augmented.csv')
 print(f"Loaded {len(df)} customers")
 
 # ── DATA CLEANING ──────────────────────────────
@@ -147,7 +147,7 @@ plt.title('Confusion Matrix — Where is the model right/wrong?',
           fontsize=13, fontweight='bold')
 plt.tight_layout()
 plt.savefig('data/chart4_confusion_matrix.png')
-plt.show()
+# plt.show()
 
 # ── FEATURE IMPORTANCE ─────────────────────────
 # Which features does the model rely on MOST?
@@ -165,7 +165,7 @@ plt.title('Top 10 Features — What drives churn?',
 plt.xlabel('Importance Score')
 plt.tight_layout()
 plt.savefig('data/chart5_feature_importance.png')
-plt.show()
+# plt.show()
 
 print("\nTop 5 churn drivers:")
 for _, row in importance_df.head(5).iterrows():
